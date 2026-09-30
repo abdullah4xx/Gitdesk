@@ -1,0 +1,58 @@
+name: Build & Release GitDesk
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write        # needed to create the GitHub Release
+
+jobs:
+  deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Server self-test (protocol + back-pressure logic)
+        run: python3 -m compileall -q server/gitdesk
+      - run: bash packaging/build-deb.sh dist
+      - uses: actions/upload-artifact@v4
+        with: { name: gitdesk-deb, path: dist/*.deb }
+
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.7" }
+      - name: Decode signing keystore (optional secret)
+        env: { KS_B64: "${{ secrets.ANDROID_KEYSTORE_B64 }}" }
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/gitdesk.jks"
+            echo "GITDESK_KEYSTORE=$RUNNER_TEMP/gitdesk.jks" >> "$GITHUB_ENV"
+          fi
+      - name: Build release APK
+        env:
+          GITDESK_KS_PASS: ${{ secrets.ANDROID_KS_PASS }}
+          GITDESK_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          GITDESK_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
+        run: gradle -p android assembleRelease --no-daemon
+      - uses: actions/upload-artifact@v4
+        with: { name: gitdesk-apk, path: android/app/build/outputs/apk/release/app-release.apk }
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [deb, apk]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts, merge-multiple: true }
+      - run: mv artifacts/app-release.apk "artifacts/GitDesk-${GITHUB_REF_NAME}.apk"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
