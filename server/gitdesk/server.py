@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from . import protocol as P
 from .encoder import EncoderError, Streamer
 
-QMAX = 6          # queued access units (~100 ms at 60 fps): bounds latency and memory
+QMAX = 6          # minimum queued access units; the real size is max(QMAX, fps // 4) (~250 ms of frames)
 STALL_S = 4.0     # kill a connection whose send() is stuck this long
 IDR_MIN_GAP = 0.3
 
@@ -88,7 +88,7 @@ class StreamServer:
                 return
             conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             conn.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 256 * 1024)
-            q = queue.Queue(maxsize=QMAX)
+            q = queue.Queue(maxsize=max(QMAX, self.cfg.fps // 4))   # ~250 ms of frames absorbs USB jitter
             st = Streamer(self.cfg, self.target, self._on_au, lambda m: self._fail(conn, m))
             self.stats = Stats(target_kbps=self.cfg.bitrate_kbps)
             self._conn, self._q, self._streamer = conn, q, st
