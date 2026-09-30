@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gitdesk"
+version = "0.1.0"
+description = "USB second monitor for Linux using an Android device"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+# PyGObject/GStreamer come from apt (python3-gi); use: python3 -m venv --system-site-packages .venv
+dependencies = ["PyQt6>=6.5"]
+
+[project.scripts]
+gitdesk = "gitdesk.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["gitdesk*"]

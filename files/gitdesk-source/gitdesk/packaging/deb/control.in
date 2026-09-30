@@ -1,0 +1,11 @@
+Package: gitdesk
+Version: @VERSION@
+Section: utils
+Priority: optional
+Architecture: all
+Maintainer: GitDesk Contributors <gitdesk@localhost>
+Depends: python3 (>= 3.10), python3-gi, gir1.2-gstreamer-1.0, gir1.2-gst-plugins-base-1.0, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-plugins-ugly, gstreamer1.0-libav, python3-pyqt6, adb, x11-xserver-utils
+Recommends: gstreamer1.0-vaapi, gstreamer1.0-pipewire
+Description: USB second monitor for Linux using an Android device
+ GitDesk creates a virtual display on your desktop, encodes it as low-latency
+ H.264 and streams it over USB (adb reverse) to the GitDesk Android app.

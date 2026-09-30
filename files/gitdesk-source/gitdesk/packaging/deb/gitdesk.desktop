@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=GitDesk
+Comment=Use your Android device as a USB second monitor
+Exec=gitdesk
+Icon=gitdesk
+Terminal=false
+Categories=Utility;System;
