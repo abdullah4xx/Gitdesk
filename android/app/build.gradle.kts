@@ -15,8 +15,8 @@ android {
         applicationId = "dev.gitdesk.client"
         minSdk = 26            // Android 8.0+
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 11
+        versionName = "1.3.0"
     }
 
     signingConfigs {
