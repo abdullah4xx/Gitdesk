@@ -1,72 +1,58 @@
-name: Build and Release GitDesk
+name: Build & Release GitDesk
 
 on:
   push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch: {}
 
 permissions:
-  contents: write
+  contents: write        # needed to create the GitHub Release
 
 jobs:
-  build:
+  deb:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - name: Server self-test (protocol + back-pressure logic)
+        run: python3 -m compileall -q server/gitdesk
+      - run: bash packaging/build-deb.sh dist
+      - uses: actions/upload-artifact@v4
+        with: { name: gitdesk-deb, path: dist/*.deb }
 
-      - name: Setup Java JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      # 1. تجهيز مجلد المخرجات وملف الـ DEB الخاص بالسيرفر
-      - name: Prepare Linux DEB Package
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: "8.7" }
+      - name: Decode signing keystore (optional secret)
+        env: { KS_B64: "${{ secrets.ANDROID_KEYSTORE_B64 }}" }
         run: |
-          mkdir -p output
-          if [ -f "files/gitdesk_0.2.0_all.deb" ]; then
-            cp files/gitdesk_0.2.0_all.deb output/GitDesk.deb
-          elif [ -f "files/v1/gitdesk_0.1.0_all.deb" ]; then
-            cp files/v1/gitdesk_0.1.0_all.deb output/GitDesk.deb
-          else
-            touch output/GitDesk.deb
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/gitdesk.jks"
+            echo "GITDESK_KEYSTORE=$RUNNER_TEMP/gitdesk.jks" >> "$GITHUB_ENV"
           fi
-
-      # 2. بناء ملف APK الأندرويد أو تجميعه
-      - name: Build Android APK
-        run: |
-          if [ -f "gradlew" ]; then
-            chmod +x gradlew
-            ./gradlew assembleRelease --no-daemon
-            cp app/build/outputs/apk/release/*.apk output/GitDesk.apk
-          else
-            find . -name "*.apk" -exec cp {} output/GitDesk.apk \; || touch output/GitDesk.apk
-          fi
-
-      # 3. رفع الملفات الناتجة كـ Artifacts
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: GitDesk-Binaries
-          path: output/
-
-      # 4. إنشاء الـ Release الرسمي ورفع الملفات بالأسماء المطلوبة
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v1.1.0
-          files: |
-            output/GitDesk.apk
-            output/GitDesk.deb
-          name: GitDesk v1.1.0
-          body: |
-            ## 🚀 GitDesk v1.1.0 Release
-            * **GitDesk.apk**: Android Client App (Low-latency wired secondary screen)
-            * **GitDesk.deb**: Linux Host Server Package
-          draft: false
-          prerelease: false
+      - name: Build release APK
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITDESK_KS_PASS: ${{ secrets.ANDROID_KS_PASS }}
+          GITDESK_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          GITDESK_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
+        run: gradle -p android assembleRelease --no-daemon
+      - uses: actions/upload-artifact@v4
+        with: { name: gitdesk-apk, path: android/app/build/outputs/apk/release/app-release.apk }
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [deb, apk]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts, merge-multiple: true }
+      - run: mv artifacts/app-release.apk "artifacts/GitDesk-${GITHUB_REF_NAME}.apk"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true
