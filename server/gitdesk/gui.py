@@ -1,4 +1,4 @@
-"""PyQt6 front-end: status, resolution, FPS, latency (RTT), bitrate, Start/Stop."""
+"""PyQt6 front-end: status, resolution, FPS, latency (RTT), bitrate, Start/Stop, Android mirror."""
 import dataclasses
 import threading
 
@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (QApplication, QComboBox, QFrame, QGridLayout, QHBox
 from .config import Config
 from .encoder import available_encoders
 from .engine import Engine
+from .mirror import Mirror, MirrorError
 
 QSS = """
 * { color:#E2E8F0; font-size:13px; }
@@ -27,6 +28,11 @@ QPushButton#go { background:#6366F1; color:#FFFFFF; border:none; border-radius:1
 QPushButton#go:hover { background:#7C7FF5; }
 QPushButton#go[running="true"] { background:#DC2626; }
 QPushButton#go:disabled { background:#334155; color:#94A3B8; }
+QPushButton#alt { background:#131A2E; color:#C7D2FE; border:1px solid #26314F; border-radius:12px;
+                  padding:12px; font-size:14px; font-weight:600; }
+QPushButton#alt:hover { background:#1A2340; }
+QPushButton#alt[running="true"] { border-color:#DC2626; color:#FCA5A5; }
+QPushButton#alt:disabled { color:#64748B; }
 """
 
 RESOLUTIONS = [  # (label, (w, h)); (0, 0) = match the device screen
@@ -65,10 +71,11 @@ class Card(QFrame):
 
 class MainWindow(QWidget):
     state_sig = pyqtSignal(str, str)
+    mirror_sig = pyqtSignal(str)
 
     def __init__(self, base: Config):
         super().__init__()
-        self.base, self.engine = base, None
+        self.base, self.engine, self.mirror = base, None, None
         self.setObjectName("root")
         self.setWindowTitle("GitDesk")
         self.setMinimumWidth(460)
@@ -124,12 +131,19 @@ class MainWindow(QWidget):
         self.btn.setObjectName("go")
         self.btn.clicked.connect(self.toggle)
         root.addWidget(self.btn)
+
+        self.mbtn = QPushButton("Mirror Android screen on this PC")
+        self.mbtn.setObjectName("alt")
+        self.mbtn.clicked.connect(self.toggle_mirror)
+        root.addWidget(self.mbtn)
+
         self.note = QLabel("")
         self.note.setObjectName("sub")
         self.note.setWordWrap(True)
         root.addWidget(self.note)
 
         self.state_sig.connect(self._on_state)
+        self.mirror_sig.connect(self._on_mirror_exit)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._tick)
         self.timer.start(500)
@@ -150,11 +164,38 @@ class MainWindow(QWidget):
             self.engine = Engine(self._cfg(), on_state=self.state_sig.emit)
             threading.Thread(target=self.engine.start, daemon=True).start()
 
+    def toggle_mirror(self) -> None:
+        m = self.mirror
+        if m and m.running:
+            m.stop()
+            self.mbtn.setEnabled(False)          # re-enabled by _on_mirror_exit
+            return
+        self.mirror = Mirror(serial=self.base.adb_serial, fps=int(self.fps.currentText()),
+                             on_exit=self.mirror_sig.emit)
+        try:
+            self.mirror.start()
+        except MirrorError as e:
+            self.note.setText(str(e))
+            return
+        self._set_mirror_button(True)
+        self.note.setText("Starting Android mirror…")
+
+    def _set_mirror_button(self, on: bool) -> None:
+        self.mbtn.setText("Stop mirroring" if on else "Mirror Android screen on this PC")
+        self.mbtn.setProperty("running", on)
+        self.mbtn.style().unpolish(self.mbtn)
+        self.mbtn.style().polish(self.mbtn)
+        self.mbtn.setEnabled(True)
+
     # ── UI updates (GUI thread) ──
     def _status(self, key: str) -> None:
         label, colour = STATE_UI[key]
         self.status.setText(label)
         self.dot.setStyleSheet(f"color:{colour}; background:transparent;")
+
+    def _on_mirror_exit(self, msg: str) -> None:
+        self._set_mirror_button(False)
+        self.note.setText(msg)
 
     def _on_state(self, state: str, msg: str) -> None:
         busy = state in ("starting", "running")
@@ -188,6 +229,8 @@ class MainWindow(QWidget):
             self.note.setText(f"Encoder: {s.encoder} · target {s.target_kbps / 1000:.1f} Mbps · dropped {s.dropped}")
 
     def closeEvent(self, ev) -> None:
+        if self.mirror:
+            self.mirror.stop()
         if self.engine:
             self.engine.stop()
         super().closeEvent(ev)
